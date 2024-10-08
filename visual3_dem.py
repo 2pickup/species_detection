@@ -372,7 +372,7 @@ def arg_parser():
     parser.add_argument('--aspect', default=True, help='use aspect as input')
     parser.add_argument("--loss_function", type=str, choices=["MSE", "MAE", "SIG", "HUBER","CE"], 
                     required=True, help="Specify the loss function to use")
-    parser.add_argument('--ckpts', default='/bess23/jooseo/experiment/2022_spec_dem/best_model/best_model_2024-10-02_13h22.pth', help='ckpts')
+    parser.add_argument('--ckpts', default='/bess23/jooseo/experiment/2022_spec_dem/best_model/best_model_2024-10-08_09h09.pth', help='ckpts')
     parser.add_argument('--gpu', type=str, default='0,1', help='specify GPU devices')
     parser.add_argument('--model_time', type=str, default=MODEL_TIME, help='model training start time')
     parser.add_argument('--exp', type=str, default=experiment_name, help='experiment name')
