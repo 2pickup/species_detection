@@ -170,14 +170,14 @@ class dataset(Dataset):
             image_slope = self.pad_image(image_slope)
             image_aspect = self.pad_image(image_aspect)
             image_height = self.pad_image(image_height)
-            if self.normalize:
-                image_s2 = self.normalize_s2(image_s2)
-                image_slope = self.normalize_slope(image_slope)
-                image_aspect = self.normalize_slope(image_aspect)
-                image_height = self.normalize_slope(image_height)
+        if self.normalize:
+            image_s2 = self.normalize_s2(image_s2)
+            image_slope = self.normalize_slope(image_slope)
+            image_aspect = self.normalize_slope(image_aspect)
+            image_height = self.normalize_slope(image_height)
             # label = self.cut_GEDI(label)
             
-            image_out = np.vstack([image_s2, image_height,image_slope, image_aspect])
+        image_out = np.vstack([image_s2, image_height,image_slope, image_aspect])
             
             
                     
@@ -252,7 +252,7 @@ class dataset(Dataset):
             #     masks = (label != 0).astype(np.uint8)
         
             
-        return (image_s2.astype(np.float32) ,x_off,y_off,self.width[item],x_min_out,y_max_out)
+        return (image_out.astype(np.float32) ,x_off,y_off,self.width[item],x_min_out,y_max_out)
             # return (image_s2.astype(np.float32) , label, bin_label, masks)
             
 
@@ -261,15 +261,13 @@ def get_dataloader(
         batch_size,
         csv_path, pft_path, s2_path, slope_path, height_path, aspect_path,
         bands_s2, slope, bands_slope, height, bands_height, aspect, bands_aspect,
-        img_shape, normalize, split,  num_workers,
-        transform = None
+        img_shape, normalize, split,  num_workers
         ):
     data = dataset(
         csv_path=csv_path, pft_path=pft_path,
         s2_path = s2_path, slope_path = slope_path , height_path = height_path , aspect_path = aspect_path,
         bands_s2=bands_s2,  slope = slope, bands_slope = bands_slope, height = height, bands_height = bands_height, aspect = aspect, bands_aspect = bands_aspect,
-        img_shape=img_shape, normalize=normalize, split=split, 
-        transform = transform
+        img_shape=img_shape, normalize=normalize, split=split
         )
     epoch_size = len(data)
     if split =='Train':
@@ -345,9 +343,9 @@ def arg_parser():
     os.makedirs(best_model_path, exist_ok=True)
     
     parser = argparse.ArgumentParser()
-    parser.add_argument('--lr', type=float, default=0.001, help='initial learning rate')
+    #parser.add_argument('--lr', type=float, default=0.001, help='initial learning rate')
     parser.add_argument('--batch_size', type=int, default=64, help='batch Size during training') #from 64
-    parser.add_argument('--epoch', default=500, type=int, help='epoch to run')
+    #parser.add_argument('--epoch', default=500, type=int, help='epoch to run')
     parser.add_argument('--num_worker', default=2, type=int, help='number of workers to load data')
     parser.add_argument('--csv_path', default=processed_csv_path_copy
                         , type=str, help='csv path')
@@ -378,6 +376,31 @@ def arg_parser():
     parser.add_argument('--gpu', type=str, default='0,1', help='specify GPU devices')
     parser.add_argument('--model_time', type=str, default=MODEL_TIME, help='model training start time')
     parser.add_argument('--exp', type=str, default=experiment_name, help='experiment name')
+    # imbalanced related
+    # LDS
+    parser.add_argument('--lds', action='store_true', default=False, help='whether to enable LDS')
+    parser.add_argument('--lds_kernel', type=str, default='gaussian',
+                        choices=['gaussian', 'triang', 'laplace'], help='LDS kernel type')
+    parser.add_argument('--lds_ks', type=int, default=5, help='LDS kernel size: should be odd number')
+    parser.add_argument('--lds_sigma', type=float, default=2, help='LDS gaussian/laplace kernel sigma')
+    # FDS
+    parser.add_argument('--fds', action='store_true', default=False, help='whether to enable FDS')
+    parser.add_argument('--fds_kernel', type=str, default='gaussian',
+                        choices=['gaussian', 'triang', 'laplace'], help='FDS kernel type')
+    parser.add_argument('--fds_ks', type=int, default=5, help='FDS kernel size: should be odd number')
+    parser.add_argument('--fds_sigma', type=float, default=2, help='FDS gaussian/laplace kernel sigma')
+    parser.add_argument('--start_update', type=int, default=0, help='which epoch to start FDS updating')
+    parser.add_argument('--start_smooth', type=int, default=1, help='which epoch to start using FDS to smooth features')
+    parser.add_argument('--bucket_num', type=int, default=50, help='maximum bucket considered for FDS')
+    parser.add_argument('--bucket_start', type=int, default=0, help='minimum(starting) bucket for FDS, 7 for NYUDv2')
+    parser.add_argument('--fds_mmt', type=float, default=0.9, help='FDS momentum')
+    # re-weighting: SQRT_INV / INV
+    parser.add_argument('--reweight', type=str, default='none', choices=['none', 'inverse', 'sqrt_inv'],
+                        help='cost-sensitive reweighting scheme')
+    # two-stage training: RRT
+    parser.add_argument('--retrain_fc', action='store_true', default=False,
+                        help='whether to retrain last regression layer (regressor)')
+    parser.add_argument('--pretrained', type=str, default='', help='pretrained checkpoint file path to load backbone weights for RRT')
     return parser.parse_args()
 
 def main(args,LOGGER):
@@ -429,11 +452,11 @@ def main(args,LOGGER):
     LOGGER.info(f'\ntest dataset: {len(test_loader.dataset)}')
 
     # Model
-    n_channels =len(DATALOADER_PARAMS.get('bands_s2'))#+len(DATALOADER_PARAMS.get('bands_slope'))+len(DATALOADER_PARAMS.get('bands_height'))+len(DATALOADER_PARAMS.get('bands_aspect'))
+    n_channels =len(DATALOADER_PARAMS.get('bands_s2'))+len(DATALOADER_PARAMS.get('bands_slope'))+len(DATALOADER_PARAMS.get('bands_height'))+len(DATALOADER_PARAMS.get('bands_aspect'))
 
     n_classes = 9
 
-    model = UNet(n_channels=n_channels, n_classes=n_classes)
+    model = UNet(n_channels=n_channels, n_classes=n_classes,args= args)
     # model = UNet_deep(n_channels=n_channels, n_classes=n_classes,args= args)
     # model = UNet_huge(n_channels=n_channels, n_classes=n_classes,args= args)
     # model = UNet_large(n_channels=n_channels, n_classes=n_classes,args= args)
@@ -528,7 +551,7 @@ if __name__ == "__main__":
     
     args = arg_parser()
     os.environ["CUDA_DEVICE_ORDER"]="PCI_BUS_ID"
-    os.environ["CUDA_VISIBLE_DEVICES"]= "0"
+    os.environ["CUDA_VISIBLE_DEVICES"]= "1"
 
     cuda_available = torch.cuda.is_available()
 
